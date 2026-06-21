@@ -1,0 +1,38 @@
+ PHYSICAL PIN  ASSIGNMENT
+ ------------  ----------
+     11        Stepper Shield EN (ENGAGE)
+     9         Stepper Shield GROUND
+     12        Stepper Shield Y.STEP
+     13        Stepper Shield Y.DR
+     2         5V terminal connection. Terminal hosts: 40mm Noctua enclosure fan power   , *and* 5V connection to shield
+     6         PIR (AM312) GROUND.
+     15        PIR (AM312) SIGNAL
+     4         PIR (AM312) POWER - 5V
+     14        40mm Noctua enclosure fan ground
+     16        KY-003 (with A3144 sensor) SIGNAL
+     17        KY-003 (with A3144 sensor) POWER - 3.3V
+     20        KY-003 (with A3144 sensor) GROUND
+
+          --- TOP OF BOARD (Near Fan Header) ---
+           3.3V Power  [ 1 ] [ 2 ]  5V Power
+     (BCM 2)    SDA1   [ 3 ] [ 4 ]  5V Power
+     (BCM 3)    SCL1   [ 5 ] [ 6 ]  Ground
+     (BCM 4)   GPCLK0  [ 7 ] [ 8 ]  TXD0    (BCM 14)
+               Ground  [ 9 ] [10 ]  RXD0    (BCM 15)
+     (BCM 17)  GPIO17  [11 ] [12 ]  GPIO18  (BCM 18)
+     (BCM 27)  GPIO27  [13 ] [14 ]  Ground
+     (BCM 22)  GPIO22  [15 ] [16 ]  GPIO23  (BCM 23)
+           3.3V Power  [17 ] [18 ]  GPIO24  (BCM 24)
+     (BCM 10)    MOSI  [19 ] [20 ]  Ground
+     (BCM 9)     MISO  [21 ] [22 ]  GPIO25  (BCM 25)
+     (BCM 11)    SCLK  [23 ] [24 ]  CE0     (BCM 8)
+               Ground  [25 ] [26 ]  CE1     (BCM 7)
+     (BCM 0)     ID_SD [27 ] [28 ]  ID_SC   (BCM 1)
+     (BCM 5)   GPIO5   [29 ] [30 ]  Ground
+     (BCM 6)   GPIO6   [31 ] [32 ]  GPIO12  (BCM 12)
+     (BCM 13)  GPIO13  [33 ] [34 ]  Ground
+     (BCM 19)  GPIO19  [35 ] [36 ]  GPIO16  (BCM 16)
+     (BCM 26)  GPIO26  [37 ] [38 ]  GPIO20  (BCM 20)
+               Ground  [39 ] [40 ]  GPIO21  (BCM 21)
+          --- BOTTOM OF BOARD (Near USB Ports) ---
+
