@@ -24,6 +24,6 @@ LISTEN_PORT = 4207 #the port on which the target listens for "display this photo
 
 PHOTO_TRANSITION_TIME = 6 #in seconds, this should probably match the time it takes for the monitor to rotate 90 degrees. The plan is to do a fade from the current to the next photo, or something
 
-TARGET_PHOTO_CACHE_PATH = "/home/biqu/photocache"
+TARGET_PHOTO_CACHE_PATH = "/home/back/photocache"
 TARGET_MAX_CACHE_GB = 200 #256GB SD Card, 225 free at the time of writing, going with 200GB for cache, adjust as necessary
 TARGET_CACHE_TRIM_SIZE = 5 #in GB, size of oldest (last time since displayed, managed with mtime as photos are touched when shown). Will delete photos up to this size when the cache is full (greater than TARGET_MAX_CACHE_GB)

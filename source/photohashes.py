@@ -19,9 +19,17 @@ def init():
     build_hash_db(config.ALBUM_DIRECTORY)
 
 
-def hash_file(filepath):
-    with open(filepath, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
+def hash_image(filepath):
+    """Reads an image in binary mode and generates a true hash based strictly on its bytes."""
+    sha256_hash = hashlib.sha256()
+    
+    # Read the file in 64KB binary chunks to handle large 4K files efficiently
+    with open(filepath, "rb") as f:
+        for byte_block in iter(lambda: f.read(65536), b""):
+            sha256_hash.update(byte_block)
+            
+    # This returns a flawless, un-fakeable fingerprint of the literal image content
+    return sha256_hash.hexdigest()
 
 def build_hash_db(directory):
     base_path = Path(directory)
@@ -32,10 +40,11 @@ def build_hash_db(directory):
         # Check if it's a file AND if the extension matches our set
         if item.is_file() and item.suffix.lower() in config.IMAGE_EXTENSIONS:
             filepath = str(item)
-            file_hash = hash_file(filepath)
+            file_hash = hash_image(filepath)
             
             temp_photo_db[file_hash] = filepath
             temp_reverse_db[filepath] = file_hash
+            print(f"generated image hash: {file_hash}")
 
     global photo_hash_db, reverse_hash_db
     photo_hash_db = temp_photo_db
@@ -53,6 +62,9 @@ def handle_event(event):
 
         debounce_timer = threading.Timer(1.0, build_hash_db, args=[config.ALBUM_DIRECTORY])
         debounce_timer.start()
+
+
+
 
 
 

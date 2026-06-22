@@ -6,7 +6,7 @@ import os
 import config
 import threading
 from source import photohashes
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 
 app = Flask(__name__)
@@ -25,28 +25,36 @@ def serve_photo(hash):
         with Image.open(file_path) as img:
             target_size = (100,100)
             width, height = img.size
-            print(f"SERVE Dimensions: {width}x{height}")
+            print(f"Original Dimensions: {width}x{height}")
             if width > height:
                 target_size = (config.MONITOR_LANDSCAPE_WIDTH, config.MONITOR_LANDSCAPE_HEIGHT)
             else:
                 target_size = (config.MONITOR_LANDSCAPE_HEIGHT, config.MONITOR_LANDSCAPE_WIDTH) 
 
+            print(f"Served Dimensions: {target_size}")
 
             try:
                 with Image.open(file_path) as img:
-                    # Use that 5800X muscle for the high-quality decode
-                    img.draft('RGB', target_size) 
+                    # 1. EXTRACT THE ORIGINAL HEADERS BEFORE DOING ANYTHING ELSE
+                    # This pulls the camera's raw binary EXIF tags (dates, GPS coordinates, etc.)
+                    exif_data = img.info.get('exif')
                     
-                    # Matchstick Resize: Keeps aspect ratio perfect
-                    img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                    # 2. Chop edges and resize to EXACTLY 3840x2160 or 2160x3840
+                    # This creates a new clean pixel object, stripping old header bindings
+                    img = ImageOps.fit(img, target_size, Image.Resampling.LANCZOS)
                     
-                    # Save to RAM buffer - no NVMe wear here!
+                    # 3. Save to RAM buffer and FORCE-INJECT the original metadata back into the stream!
                     img_io = io.BytesIO()
-                    img.save(img_io, 'JPEG', quality=92, subsampling=0, optimize=True)
-                    img_io.seek(0)
                     
+                    if exif_data:
+                        # Re-bind the exact raw binary metadata straight into the 4K output file
+                        img.save(img_io, 'JPEG', quality=92, subsampling=0, optimize=True, exif=exif_data)
+                    else:
+                        img.save(img_io, 'JPEG', quality=92, subsampling=0, optimize=True)
+                        
+                    img_io.seek(0)
                     return send_file(img_io, mimetype='image/jpeg')
-                
+                            
             except Exception as e:
                 print(f"Server Error: {e}")
                 return "Server error", 500

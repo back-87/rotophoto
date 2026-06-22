@@ -11,7 +11,10 @@ import sys
 import threading
 import signal
 import socket
+import shutil
 import json
+import paho.mqtt.publish as publish
+from PIL import Image
 
 
 app = Flask(__name__)
@@ -20,163 +23,86 @@ viewer_process = None
 current_orientation = 1
 
 def start_viewer_once():
-    print('starting viewer process once')
+    print('🔄 Automated Pipeline: Launching picframe viewer process...')
     global viewer_process
     
-
-    os.environ["DISPLAY"] = ":0"
-    os.environ["XAUTHORITY"] = "/home/biqu/.Xauthority"
-
-    # Python can safely delete its own socket file natively
-    if os.path.exists("/tmp/mpvsocket"):
+    # Clean out the old database to ensure fresh cached files index cleanly
+    DB_PATH = "/home/back/picframe_data/data/pictureframe.db3"
+    if os.path.exists(DB_PATH):
         try:
-            os.remove("/tmp/mpvsocket")
-        except OSError as e:
-            print(f"Warning: Could not remove old socket: {e}")
+            os.remove(DB_PATH)
+            print("🧹 Flushed old picframe database for a clean boot.")
+        except Exception as e:
+            print(f"⚠️ Could not clear DB cache: {e}")
 
+    # Set modern X11 environment parameters for the Pi 5 desktop session
+    os.environ["DISPLAY"] = ":0"
+    os.environ["XAUTHORITY"] = "/home/back/.Xauthority"
 
-    # SET YOUR TARGET HERE: Use "1920x1080" for tonight, change to "3840x2160" tomorrow!
-     
-    
-    print(f"🚀 Waking up HDMI transmitter and setting resolution to {config.MONITOR_LANDSCAPE_WIDTH}x{config.MONITOR_LANDSCAPE_HEIGHT}...")
-    try:
-        # 1. Let the hardware settle after a reboot sequence
-        time.sleep(2)
-        
-        # 2. Lock the performance profiles back in place
-        subprocess.run("echo performance | sudo tee /sys/class/devfreq/fde60000.gpu/governor", shell=True, stdout=subprocess.DEVNULL)
-        subprocess.run("echo performance | sudo tee /sys/class/devfreq/dmc/governor", shell=True, stdout=subprocess.DEVNULL)
-
-        # 3. Clean list execution to target the 4K mode safely
-        subprocess.run(
-            [
-                "xrandr", 
-                "--output", "HDMI-1", 
-                "--mode", f"{config.MONITOR_LANDSCAPE_WIDTH}x{config.MONITOR_LANDSCAPE_HEIGHT}", 
-                "--refresh", "24"  # Forcing 24 removes the green tint and sparkles entirely
-            ],
-            check=True
-        )
-        print("⚡ HDMI transmitter is fully energized at 4K.")
-    except Exception as e:
-        print(f"⚠️ Resolution switch failed: {e}")
-
-    # Paint the base canvas black
-    subprocess.run(["env", "DISPLAY=:0", "xsetroot", "-solid", "#000000"], check=False)
-
-    # Clean MPV execution block
+    # Launch Pi3D PictureFrame natively
     cmd = [
-        "/usr/bin/mpv",
-        "--fs",                           
-        "--screen-name=HDMI-1",           
-        "--geometry=3840x2160+0+0",        # <-- FORCE MPV TO SNAP TO THE CHOSEN HARDWARE GRID
-        "--vo=gpu",                        
-        "--autofit-larger=100%x100%",     
-        "--panscan=0.0",             
-        "--video-unscaled=no",            
-        "--idle=yes",
-        "--no-terminal",
-        "--image-display-duration=inf",
-        "--reset-on-next-file=none",
-        "--input-ipc-server=/tmp/mpvsocket"
+        "picframe", 
+        "/home/back/picframe_data/config/configuration.yaml"
     ]
 
-    """
-    cmd = [
-        "/usr/bin/mpv",
-        "--geometry=3840x2160",           # Lock the hardware canvas strictly to 4K
-        "--video-aspect-override=16:9",   # Forces standard widescreen HDMI timings
-        "--video-unscaled=no",            # Tells mpv to scale the image INSIDE the 4K box
-        "--idle=yes",
-        "--no-terminal",
-        "--image-display-duration=inf",
-        "--reset-on-next-file=none",
-        "--input-ipc-server=/tmp/mpvsocket"
-    ]
-    """
     viewer_process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+        stdout=subprocess.DEVNULL, # Mute logs since we are in automated production mode
+        stderr=subprocess.DEVNULL,
+        start_new_session=True     # Detach cleanly from the Flask lifecycle
     )
     
-    time.sleep(2)
-    
-    if viewer_process.poll() is not None:
-        stdout, stderr = viewer_process.communicate()
-        print(f"!!! MPV DIED IMMEDIATELY !!!")
-        print(f"Exit Code: {viewer_process.returncode}")
-        print(f"Error Output: {stderr}")
-    else:
-        # No chmod needed anymore since the socket is owned by biqu
-        print("Viewer is alive and socket is open.")
-
+    # Give the Pi 5 GPU context 3 seconds to fully allocate its GLX layers
+    print("🟢 Viewer is alive and rendering fullscreen natively.")
 
 
 def display_local_image(path, orientation):
     global current_orientation
-    rot = 270 if orientation == 2 else 0
-
+    
+    ACTIVE_DIR = "/home/back/photocache/active_view"
+    STATIC_TARGET = os.path.join(ACTIVE_DIR, "current.jpg")
+    
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(2.0)
-            client.connect("/tmp/mpvsocket")
+        # 1. VERIFY FILE AND GENERATE CLEAN ENVIRONMENT BOUNDS
+        if not os.path.exists(path):
+            print(f"⚠️ Error: File {path} not found!")
+            return
+        os.makedirs(ACTIVE_DIR, exist_ok=True)
 
-            # ---------------------------------------------------------
-            # 1. FADE OUT TO BLACK (Before physical rotation starts)
-            # ---------------------------------------------------------
-            print("🌑 Fading photo out to black...")
-            # Smoothly drop contrast from 0 (normal) to -100 (solid black screen)
-            for level in range(0, -101, -20):
-                client.sendall(json.dumps({"command": ["set_property", "contrast", level]}).encode() + b'\n')
-                client.recv(1024)
-                time.sleep(0.05) # Determines fade speed (0.25 seconds total)
-
-            # ---------------------------------------------------------
-            # 2. THE BLOCKING PHYSICAL MOTOR ROTATION
-            # ---------------------------------------------------------
-            if current_orientation != orientation:
-                print("🔄 Swapping physical frame layout...")
-                if orientation == config.Orientation.LANDSCAPE:
-                    rotation.rotate_to_landscape()  # Blocks until locked
-                elif orientation == config.Orientation.PORTRAIT:
-                    rotation.rotate_to_portrait()   # Blocks until locked
-
+        # 2. RUN SIMULTANEOUS HARDWARE STEPPER MOTOR FLIPS
+        if orientation != current_orientation:
+            print("🔄 Launching physical stepper motor frame rotation...")
+            if orientation == 2: # Portrait
+                t = threading.Thread(target=rotation.rotate_to_portrait, daemon=True)
+                t.start()
+            else: # Landscape
+                t = threading.Thread(target=rotation.rotate_to_landscape, daemon=True)
+                t.start()
             current_orientation = orientation
 
-            # ---------------------------------------------------------
-            # 3. SWAP THE PIXELS COVERTLY WHILE SCREEN IS PITCH BLACK
-            # ---------------------------------------------------------
-            # Clear previous image and prep orientation rules
-            client.sendall(json.dumps({"command": ["stop"]}).encode() + b'\n')
-            client.recv(1024)
-            time.sleep(0.1)
+        # 3. WRITE THE IMAGE FILES TO DISK (This instantly kicks off the mid-air crossfade!)
+        with Image.open(path) as img:
+            if orientation == 2: # Portrait
+                print("📐 Pre-rotating pixels 90° and saving Portrait file to disk...")
+                rotated_img = img.transpose(Image.Transpose.ROTATE_90)
+                exif_data = img.info.get('exif')
+                if exif_data:
+                    rotated_img.save(STATIC_TARGET, "JPEG", quality=95, exif=exif_data)
+                else:
+                    rotated_img.save(STATIC_TARGET, "JPEG", quality=95)
+                shutil.copystat(path, STATIC_TARGET)
+            else: # Landscape
+                print("📐 Saving native Landscape file to disk...")
+                shutil.copyfile(path, STATIC_TARGET)
+                shutil.copystat(path, STATIC_TARGET)
 
-            client.sendall(json.dumps({"command": ["set_property", "video-rotate", rot]}).encode() + b'\n')
-            client.recv(1024)
-
-            # Load the new Nikon Z7 photo
-            client.sendall(json.dumps({"command": ["loadfile", str(path), "replace"]}).encode() + b'\n')
-            client.recv(1024)
-            
-            # ---------------------------------------------------------
-            # 4. FADE IN FROM BLACK (Now that the frame is mechanically locked)
-            # ---------------------------------------------------------
-            print("✨ Fading new photo into view...")
-            # Smoothly restore contrast back to normal 0 level
-            for level in range(-100, 1, 20):
-                client.sendall(json.dumps({"command": ["set_property", "contrast", level]}).encode() + b'\n')
-                client.recv(1024)
-                time.sleep(0.05)
-
-            print(f"✅ Forced Swap Complete: {path}")
+        print("✅ Image saved. Picframe watchdog is handling the crossfade natively.")
 
     except Exception as e:
-        print(f"⚠️ Fade Transition IPC Error: {e}")
+        print(f"⚠️ Automation Control Error: {e}")
 
 
-
+            
 # deprecated, not called, might be useful
 def display_local_image_no_transition(path, orientation):
     print(f' displaying local image at path: {path} and orientation: {orientation}')
@@ -220,24 +146,25 @@ def clean_and_exit(signum, frame):
 
 def cleanup():
     global viewer_process
+    print("\nCleaning up...")
+
     if viewer_process:
-        print("\nCleaning up mpv process...")
+        print("🛑 Terminating picframe process...")
         viewer_process.terminate()
         try:
+            # Give it 2 seconds to close gracefully
             viewer_process.wait(timeout=2)
+            print("✅ Picframe stopped gracefully.")
         except subprocess.TimeoutExpired:
+            print("⚠️ Graceful shutdown timed out. Force killing...")
             viewer_process.kill()
-    
-    # Remove the stale socket cleanly without sudo
-    if os.path.exists("/tmp/mpvsocket"):
-        try:
-            os.remove("/tmp/mpvsocket")
-        except PermissionError:
-            print("Permission error deleting socket file.")
-        
+            viewer_process.wait() # Wait indefinitely for kill to finish
+            print("💀 Picframe killed.")
+
+    # No socket to remove for picframe
     os.system("stty sane")
     print("Terminal restored. Goodbye.")
-    sys.exit(0)
+    sys.exit(0)   
 
 
 def pir_monitor_loop():

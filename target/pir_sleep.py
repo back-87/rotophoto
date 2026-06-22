@@ -12,18 +12,28 @@ last_motion_time = time.time()
 def wake_screen():
     global SCREEN_IS_AWAKE
     if not SCREEN_IS_AWAKE:
-        print("🏃 Motion detected! Waking up 32\" monitor...")
-        # Force the HDMI line back on to your stable resolution
-        subprocess.run(["env", "DISPLAY=:0", "xrandr", "--output", "HDMI-1", "--mode", f"{config.MONITOR_LANDSCAPE_WIDTH}x{config.MONITOR_LANDSCAPE_HEIGHT}"])
-        SCREEN_IS_AWAKE = True
+        print("🏃 Motion detected! Waking up 32\" monitor gracefully...")
+        try:
+            # 1. Force the XServer to trigger a software wake event
+            subprocess.run(["env", "DISPLAY=:0", "xset", "dpms", "force", "on"], check=True)
+            # 2. Reset the internal X11 activity clocks to keep it awake
+            subprocess.run(["env", "DISPLAY=:0", "xset", "s", "reset"], check=True)
+            SCREEN_IS_AWAKE = True
+            print("🟢 Monitor is fully energized.")
+        except Exception as e:
+            print(f"⚠️ Wake failed: {e}")
 
 def sleep_screen():
     global SCREEN_IS_AWAKE
     if SCREEN_IS_AWAKE:
-        print("💤 Room is quiet. Sending monitor to power-saving mode...")
-        # Forcibly shut down the HDMI clock pipeline to drop the monitor to sleep
-        subprocess.run(["env", "DISPLAY=:0", "xrandr", "--output", "HDMI-1", "--off"])
-        SCREEN_IS_AWAKE = False
+        print("💤 Room is quiet. Sending monitor to hardware power-saving mode...")
+        try:
+            # Forcibly turn off the HDMI backlight pipeline without destroying the 4K window layout
+            subprocess.run(["env", "DISPLAY=:0", "xset", "dpms", "force", "off"], check=True)
+            SCREEN_IS_AWAKE = False
+            print("🌙 Standby command delivered cleanly.")
+        except Exception as e:
+            print(f"⚠️ Sleep failed: {e}")
 
 def pir_monitor_loop():
     global last_motion_time
