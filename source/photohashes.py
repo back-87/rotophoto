@@ -5,6 +5,7 @@ import hashlib
 import config
 import threading
 from pathlib import Path
+from source import iteratephotos
 
 photo_hash_db = {} #hash to file
 reverse_hash_db = {} #file to hash
@@ -49,7 +50,8 @@ def build_hash_db(directory):
     global photo_hash_db, reverse_hash_db
     photo_hash_db = temp_photo_db
     reverse_hash_db = temp_reverse_db
-    print(f"DB rebuilt: {len(photo_hash_db)} images found.")
+    print(f"DB rebuilt: {len(photo_hash_db)} images found. Telling iterator to refresh its file list")
+    iteratephotos.refresh_file_list()
 
 def handle_event(event):
     global debounce_timer

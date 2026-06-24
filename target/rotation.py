@@ -1,6 +1,11 @@
 import gpiod
 import time
 import sys
+import threading
+import queue
+
+if __name__ == '__main__' and 'target.rotation' not in sys.modules:
+    sys.modules['target.rotation'] = sys.modules['__main__']
 
 # =========================================================
 # ⚙️ SYSTEM TRANSFERS FOR YOUR EXACT PHYSICAL TABLE
@@ -25,18 +30,23 @@ START_DELAY = 120000    # Slow start for max torque (nanoseconds)
 TARGET_DELAY = 28000    # "Decent" cruise speed (nanoseconds)
 RAMP_STEPS = 12500      # Long ramp to power through the 45° wall
 
+# --- NEW SAFE HOMING SPEEDS FOR 3-SCREW SURVIVAL ---
+HOMING_TARGET_DELAY = 60000  # Safe, capped top speed for the short framing burst (2x slower than cruise)
+
 # --- YOUR EXACT PHYSICAL FRAMING TUNING ---
 COAST_LANDSCAPE = 9100  # Steps needed to level out square at Landscape (0°)
 COAST_PORTRAIT = 7450   # Steps needed to level out square at Portrait (90°)
 
 TRANSITION_IN_PROGRESS = False
 CURRENT_STATE = "HOMING_INCOMPLETE"
+rotation_queue = queue.LifoQueue()
 
-# Unified single kernel handle for the Pi 5's RP1 chip
 req_rp1 = None
+rp1_chip = None
 
 def execute_pulse(delay_ns):
     global req_rp1
+
     """Generates a single precise physical step pulse using the single RP1 driver."""
     req_rp1.set_value(STEP_PIN, gpiod.line.Value.ACTIVE)
     t_start = time.perf_counter_ns()
@@ -50,7 +60,6 @@ def run_boot_homing_sweep():
     global req_rp1
     """Safely sweeps the monitor to guarantee an absolute, perfectly level baseline."""
     print("🔍 Scanning physical sensors to determine current position...")
-    
     # CASE A: Magnet is detected right away, but could be resting crookedly at the outer edge
     if req_rp1.get_value(HALL_PIN) == gpiod.line.Value.INACTIVE:
         print("🧲 Magnet detected instantly on boot! Verifying absolute alignment...")
@@ -74,12 +83,13 @@ def run_boot_homing_sweep():
         while req_rp1.get_value(HALL_PIN) != gpiod.line.Value.INACTIVE:
             execute_pulse(START_DELAY)
             
-        # 3. Apply the exact level offset
+        # 3. Apply the exact level offset with a true, gentle acceleration ramp
         print(f"🚗 Aligning: Executing {COAST_LANDSCAPE} final Landscape framing steps...")
         for coast_step in range(COAST_LANDSCAPE):
-            curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
+            # True acceleration: Starts at START_DELAY (slow) and ramps smoothly down to HOMING_TARGET_DELAY (medium)
+            curr_delay = START_DELAY - ((START_DELAY - HOMING_TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
             execute_pulse(curr_delay)
-            
+        
         return "LANDSCAPE"
 
     # CASE B: No magnet detected (Panel is hanging at 45° sag OR perfectly balanced at 90° Portrait)
@@ -103,7 +113,8 @@ def run_boot_homing_sweep():
     if homed_successfully:
         print(f"🚗 Aligning: Executing {COAST_LANDSCAPE} final Landscape framing steps...")
         for coast_step in range(COAST_LANDSCAPE):
-            curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
+            # True acceleration: Starts at START_DELAY (slow) and ramps smoothly down to HOMING_TARGET_DELAY (medium)
+            curr_delay = START_DELAY - ((START_DELAY - HOMING_TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
             execute_pulse(curr_delay)
         return "LANDSCAPE"
     else:
@@ -113,148 +124,169 @@ def run_boot_homing_sweep():
         sys.exit(1)
 
 def initialize():
-    global CURRENT_STATE, TRANSITION_IN_PROGRESS
-    global req_rp1
+    global rotation_queue, TRANSITION_IN_PROGRESS,CURRENT_STATE
+    global req_rp1, rp1_chip
 
     if not TRANSITION_IN_PROGRESS:
-        with gpiod.Chip('/dev/gpiochip4') as rp1_chip:
+        rp1_chip = gpiod.Chip('/dev/gpiochip4')
 
-            # Output settings
-            out_settings = gpiod.LineSettings(direction=gpiod.line.Direction.OUTPUT)
+        # Output settings
+        out_settings = gpiod.LineSettings(direction=gpiod.line.Direction.OUTPUT)
+        
+        # Input settings for sensors with external pull-downs (Hall)
+        in_settings_disabled = gpiod.LineSettings(
+            direction=gpiod.line.Direction.INPUT, 
+            bias=gpiod.line.Bias.DISABLED
+        )
+        
+        # Input settings for sensors needing internal pull-ups (e.g., PIR)
+        in_settings_pullup = gpiod.LineSettings(
+            direction=gpiod.line.Direction.INPUT, 
+            bias=gpiod.line.Bias.PULL_UP
+        )
+
+        req_rp1 = rp1_chip.request_lines(
+            config={
+                STEP_PIN: out_settings,
+                DIR_PIN:  out_settings,
+                EN_PIN:   out_settings,
+                # Use PULL_UP if your PIR needs it, otherwise switch to DISABLED if it has external resistors
+                PIR_PIN:  in_settings_pullup, 
+                # Use DISABLED to let your external 10k resistor do the work
+                HALL_PIN: in_settings_disabled 
+            }, 
+            consumer="monitor_flip"
+        )
+        TRANSITION_IN_PROGRESS = True
+        try:
+            print("⚡ Energizing TMC2209 driver (Holding Weight)...")
+            req_rp1.set_value(EN_PIN, gpiod.line.Value(0)) 
+            time.sleep(0.2)
             
-            # Input settings for sensors with external pull-downs (Hall)
-            in_settings_disabled = gpiod.LineSettings(
-                direction=gpiod.line.Direction.INPUT, 
-                bias=gpiod.line.Bias.DISABLED
-            )
-            
-            # Input settings for sensors needing internal pull-ups (e.g., PIR)
-            in_settings_pullup = gpiod.LineSettings(
-                direction=gpiod.line.Direction.INPUT, 
-                bias=gpiod.line.Bias.PULL_UP
-            )
 
-            req_rp1 = rp1_chip.request_lines(
-                config={
-                    STEP_PIN: out_settings,
-                    DIR_PIN:  out_settings,
-                    EN_PIN:   out_settings,
-                    # Use PULL_UP if your PIR needs it, otherwise switch to DISABLED if it has external resistors
-                    PIR_PIN:  in_settings_pullup, 
-                    # Use DISABLED to let your external 10k resistor do the work
-                    HALL_PIN: in_settings_disabled 
-                }, 
-                consumer="monitor_flip"
-            )
+            CURRENT_STATE = run_boot_homing_sweep()
 
-            with req_rp1:
+            TRANSITION_IN_PROGRESS = False
+
+
+            while True:
+                last_received_rotation_instruction = None
                 try:
-                    print("⚡ Energizing TMC2209 driver (Holding Weight)...")
-                    req_rp1.set_value(EN_PIN, gpiod.line.Value(0)) 
-                    time.sleep(0.2)
-                    TRANSITION_IN_PROGRESS = True
-                    CURRENT_STATE = run_boot_homing_sweep()
-                    TRANSITION_IN_PROGRESS = False
-                    
-                    print("🟢 Setup complete. Staging active loop listening for PIR...")
-                    while True:
-                        # Baseline polling structure for your motion sensors
-                        if req_rp1.get_value(PIR_PIN) == gpiod.line.Value.ACTIVE:
-                            print("🏃 PIR Triggered! Adjusting display profile...")
-                        time.sleep(0.5)
+                    last_received_rotation_instruction = rotation_queue.get_nowait()
+                except queue.Empty:
+                    time.sleep(1.1)
 
-                except KeyboardInterrupt:
-                    print("\n🛑 Shutting down system cleanly...")
-                finally:
-                    req_rp1.set_value(EN_PIN, gpiod.line.Value(1)) 
-                    print("👋 Holding torque released. System offline.")
+                if last_received_rotation_instruction is not None:
+                    rotation_queue = queue.LifoQueue() #not interested in stale rotation requests, discard them
+                    stepper_interaction(last_received_rotation_instruction)
+
+
+        except KeyboardInterrupt:
+            print("\n🛑 Shutting down system cleanly...")
+            req_rp1.set_value(EN_PIN, gpiod.line.Value(1)) 
+            print("👋 Holding torque released. System offline.")
+            
     else:
         print("❌ LOGICAL ERROR: told to initialize but it seems a transition is already in progress")
 
+def peek_last_received_rotation_instruction():
+    if rotation_queue is not None and not rotation_queue.empty():
+        with rotation_queue.mutex:
+            return rotation_queue.queue[-1].upper() # Return target in flight
+            
+    # 🏁 FALLBACK: If the queue is empty, the system is resting!
+    # The active display matches the physical orientation perfectly.
+    return CURRENT_STATE.upper() 
+
 def rotate_to_landscape():
-    global CURRENT_STATE, TRANSITION_IN_PROGRESS
-    global req_rp1
-
-    if not TRANSITION_IN_PROGRESS:
-        TRANSITION_IN_PROGRESS = True
-        if CURRENT_STATE == "PORTRAIT":
-            print(f"🚀 Moving panel from PORTRAIT to LANDSCAPE...")
-            req_rp1.set_value(DIR_PIN, gpiod.line.Value(1)) 
-            time.sleep(0.1)
-            
-            steps_taken = 0
-
-            # --- FIXED DEBOUNCE FILTER VARIABLES ---
-            consecutive_inactive_reads = 0
-            REQUIRED_CONFIRMATIONS = 8 # Number of clean reads required to confirm real magnet presence
-            
-            while True:
-                # Read the raw physical sensor state
-                sensor_now = req_rp1.get_value(HALL_PIN)
-                
-                if sensor_now == gpiod.line.Value.INACTIVE:
-                    consecutive_inactive_reads += 1
-                else:
-                    consecutive_inactive_reads = 0 # Instantly reset counter if it was just a noise glitch
-                
-                # Only break the loop if the sensor is consistently INACTIVE
-                if consecutive_inactive_reads >= REQUIRED_CONFIRMATIONS:
-                    break
-
-                # 1. Acceleration Phase (First 12,500 steps)
-                if steps_taken < RAMP_STEPS:
-                    curr_delay = START_DELAY - ((START_DELAY - TARGET_DELAY) * steps_taken // RAMP_STEPS)
-                # 2. Maintain uniform cruise speed
-                else:
-                    curr_delay = TARGET_DELAY
-
-                execute_pulse(curr_delay)
-                steps_taken += 1
-
-                if steps_taken > MAX_RUNTIME_CAP:
-                    print("❌ EMERGENCY ABORT: Landscape sensor missed! Hard stopping.")
-                    req_rp1.set_value(EN_PIN, gpiod.line.Value(1))
-                    sys.exit(1)
-
-            print(f"🚗 Aligning after {steps_taken} steps because pin is {req_rp1.get_value(HALL_PIN)}. Executing {COAST_LANDSCAPE} final Landscape framing steps...")
-            for coast_step in range(COAST_LANDSCAPE):
-                curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
-                execute_pulse(curr_delay)
-            CURRENT_STATE = "LANDSCAPE"
-            print(f"🏁 Rotation Complete! Locked cleanly at {CURRENT_STATE}.")
-            TRANSITION_IN_PROGRESS = False
-        else:
-            print("❌ LOGICAL ERROR: told to rotate to LANDSCAPE, panel appears to already be in LANDSCAPE")
-            TRANSITION_IN_PROGRESS = False
-    else:
-        print("❌ LOGICAL ERROR: told to rotate to landscape but it seems a transition is already in progress")
-
+    rotation_queue.put_nowait("LANDSCAPE")
+    print(f"rotate landscape called, rotation queue contents: {list(reversed(rotation_queue.queue))}")
 def rotate_to_portrait():
+    rotation_queue.put_nowait("PORTRAIT")
+    print(f"rotate portrait called, rotation queue contents: {list(reversed(rotation_queue.queue))} id of queue: {id(rotation_queue)}")
+
+def stepper_interaction(orientation):
     global CURRENT_STATE, TRANSITION_IN_PROGRESS
     global req_rp1
 
-    if not TRANSITION_IN_PROGRESS:
-        TRANSITION_IN_PROGRESS = True
-        if CURRENT_STATE == "LANDSCAPE":
-            print(f"🚀 Moving panel from LANDSCAPE to PORTRAIT...")
-            req_rp1.set_value(DIR_PIN, gpiod.line.Value(0)) 
-            time.sleep(0.1)
+    if TRANSITION_IN_PROGRESS: 
+        return
+
+
+    TRANSITION_IN_PROGRESS = True
+    req_rp1.set_value(EN_PIN, gpiod.line.Value(0)) 
+
+    if orientation == "PORTRAIT" and CURRENT_STATE != "PORTRAIT":
+        print(f"🚀 Moving panel from LANDSCAPE to PORTRAIT...")
+        req_rp1.set_value(DIR_PIN, gpiod.line.Value(0)) 
+        time.sleep(0.1)
+    
+        for i in range(TOTAL_STEPS):
+            if i < RAMP_STEPS:
+                curr_delay = START_DELAY - ((START_DELAY - TARGET_DELAY) * i // RAMP_STEPS)
+            elif i > (TOTAL_STEPS - RAMP_STEPS):
+                j = i - (TOTAL_STEPS - RAMP_STEPS)
+                curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * j // RAMP_STEPS)
+            else:
+                curr_delay = TARGET_DELAY
             
-            for i in range(TOTAL_STEPS):
-                if i < RAMP_STEPS:
-                    curr_delay = START_DELAY - ((START_DELAY - TARGET_DELAY) * i // RAMP_STEPS)
-                elif i > (TOTAL_STEPS - RAMP_STEPS):
-                    j = i - (TOTAL_STEPS - RAMP_STEPS)
-                    curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * j // RAMP_STEPS)
-                else:
-                    curr_delay = TARGET_DELAY
-                
-                execute_pulse(curr_delay)
-            CURRENT_STATE = "PORTRAIT"
-            print(f"🏁 Rotation Complete! Locked cleanly at {CURRENT_STATE}.")
-            TRANSITION_IN_PROGRESS = False
-        else:
-            print("❌ LOGICAL ERROR: told to rotate to PORTRAIT, panel appears to already be in PORTRAIT")
-            TRANSITION_IN_PROGRESS = False
-    else:
-        print("❌ LOGICAL ERROR: told to rotate to portrait but it seems a transition is already in progress")
+            execute_pulse(curr_delay)
+        CURRENT_STATE = "PORTRAIT"
+        print(f"🏁 Rotation Complete! Locked cleanly at {CURRENT_STATE}.")
+    elif orientation == "LANDSCAPE" and CURRENT_STATE != "LANDSCAPE":
+        print(f"🚀 Moving panel from PORTRAIT to LANDSCAPE...")
+        req_rp1.set_value(DIR_PIN, gpiod.line.Value(1)) 
+        time.sleep(0.1)
+        
+        steps_taken = 0
+
+        # --- FIXED DEBOUNCE FILTER VARIABLES ---
+        consecutive_inactive_reads = 0
+        REQUIRED_CONFIRMATIONS = 8 # Number of clean reads required to confirm real magnet presence
+        
+        while True:
+            # Read the raw physical sensor state
+            sensor_now = req_rp1.get_value(HALL_PIN)
+            
+            if sensor_now == gpiod.line.Value.INACTIVE:
+                consecutive_inactive_reads += 1
+            else:
+                consecutive_inactive_reads = 0 # Instantly reset counter if noise glitch
+            
+            # Only break the loop if the sensor is consistently INACTIVE
+            if consecutive_inactive_reads >= REQUIRED_CONFIRMATIONS:
+                break
+
+            # 1. Acceleration Phase (First 12,500 steps)
+            if steps_taken < RAMP_STEPS:
+                curr_delay = START_DELAY - ((START_DELAY - TARGET_DELAY) * steps_taken // RAMP_STEPS)
+            # 2. Maintain uniform cruise speed
+            else:
+                curr_delay = TARGET_DELAY
+
+            execute_pulse(curr_delay)
+            steps_taken += 1
+
+            if steps_taken > MAX_RUNTIME_CAP:
+                print("❌ EMERGENCY ABORT: Landscape sensor missed! Hard stopping.")
+                req_rp1.set_value(EN_PIN, gpiod.line.Value(1))
+                sys.exit(1)
+
+        # 🛠️ MOVE THE PRINT STATEMENT HERE (Outside the while loop!)
+        print(f"🏁 Sensor Found! Aligning after {steps_taken} total steps because pin is {req_rp1.get_value(HALL_PIN)}.")
+        print(f"🚗 Executing {COAST_LANDSCAPE} final Landscape framing steps...")
+        
+        # Now run your coasting framing loop safely
+        for coast_step in range(COAST_LANDSCAPE):
+            curr_delay = TARGET_DELAY + ((START_DELAY - TARGET_DELAY) * coast_step // COAST_LANDSCAPE)
+            execute_pulse(curr_delay)
+            
+        CURRENT_STATE = "LANDSCAPE"
+        print(f"🏁 Rotation Complete! Locked cleanly at {CURRENT_STATE}.")
+
+    TRANSITION_IN_PROGRESS = False
+
+def cleanup():
+    req_rp1.set_value(EN_PIN, gpiod.line.Value(1)) # Disable motor
+
+

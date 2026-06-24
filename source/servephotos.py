@@ -6,10 +6,33 @@ import os
 import config
 import threading
 from source import photohashes
+from source import iteratephotos
 from PIL import Image, ImageOps
 import io
 
 app = Flask(__name__)
+
+#the display has a control module at the bottom with two buttons that allow for 3 funcionalities:
+#a) left button pressed, previous photo
+#b) right button pressed, next photo
+#c) both buttons pressed simultaneously, pause the slide show (see is_paused global)
+@app.route('/rotophoto/backchannel/<command>')
+def handle_backchannel_command(command):
+    print(f"Received backchannel command: {command}")
+
+    if command == "next":
+        iteratephotos.next_photo(True)
+        return "OK", 200
+    elif command == "previous":
+        iteratephotos.previous_photo(True)
+        return "OK", 200
+    elif command == "pause":
+        iteratephotos.pause_unpause()
+        return "OK", 200
+    else:
+        print("unrecognized command receivbed at REST path /rotophoto/backchannel/[command]")
+        return "Not Found", 404
+
 
 
 @app.route('/rotophoto/<hash>')
@@ -35,19 +58,14 @@ def serve_photo(hash):
 
             try:
                 with Image.open(file_path) as img:
-                    # 1. EXTRACT THE ORIGINAL HEADERS BEFORE DOING ANYTHING ELSE
-                    # This pulls the camera's raw binary EXIF tags (dates, GPS coordinates, etc.)
+
                     exif_data = img.info.get('exif')
                     
-                    # 2. Chop edges and resize to EXACTLY 3840x2160 or 2160x3840
-                    # This creates a new clean pixel object, stripping old header bindings
                     img = ImageOps.fit(img, target_size, Image.Resampling.LANCZOS)
                     
-                    # 3. Save to RAM buffer and FORCE-INJECT the original metadata back into the stream!
                     img_io = io.BytesIO()
                     
                     if exif_data:
-                        # Re-bind the exact raw binary metadata straight into the 4K output file
                         img.save(img_io, 'JPEG', quality=92, subsampling=0, optimize=True, exif=exif_data)
                     else:
                         img.save(img_io, 'JPEG', quality=92, subsampling=0, optimize=True)
@@ -64,15 +82,7 @@ def serve_photo(hash):
 
     photo_hash = photohashes.reverse_hash_db.get(file_str)
     print(f"Instructing target to display photo with hash: {photo_hash}")
-    
 
-
-
-    try:
-        #return send_from_directory(UPLOAD_FOLDER, filename)
-        print('iterate directory to find image matching hash here')
-    except FileNotFoundError:
-        return "File not found", 404
 
 def standup():
     print(f"standing up server listening on {config.LISTEN_PORT}")

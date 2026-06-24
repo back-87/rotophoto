@@ -12,19 +12,5 @@ When running either target or source:
 
 
 After installing requirements in your venv, while still with the venv active, navigate to ~/ and do $ picframe -i .
-edit ~/picframe_data/config/configuration.yaml so that:
 
-viewer:
-  # ... your other working settings (use_glx: True, width/height) ...
-  
-  # 1. Turn this to TRUE to stretch/scale images to fill every pixel of the 4K panel
-  fit: True 
-  
-  # 2. Change this to FALSE to strip away the border matting entirely
-  edge_alpha: 0.0 
-  
-  # 3. Drop the blur to 0 to completely eliminate any background letterboxing shadows
-  blur_amount: 0 
-
-  
-April 30 2026
+It is recommended to write over ~/picframe/config/configuration.yaml with the copy in this repo
