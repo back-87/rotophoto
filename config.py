@@ -17,6 +17,12 @@ MONITOR_LANDSCAPE_HEIGHT = 2160
 #MONITOR_LANDSCAPE_HEIGHT = 1080 
 # ^^ obviously these are swapped for conversion if the image is portrait
 
+
+BUTTON_CHIP = 0
+BUTTON_PREV_PIN = 24
+BUTTON_NEXT_PIN = 25
+
+
 PIR_CHIP = 0
 PIR_PIN = 6  # Change to your actual PIR signal pin
 

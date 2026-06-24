@@ -4,6 +4,7 @@ import config
 from target import grabphoto
 from target import rotation
 from target import pir_sleep
+from target import button_control
 import subprocess
 import time
 import os
@@ -200,4 +201,6 @@ if __name__ == '__main__':
     start_viewer_once()
     pir_thread = threading.Thread(target=pir_sleep.pir_monitor_loop, daemon=True)
     pir_thread.start()
+    button_control_thread = threading.Thread(target=button_control.handle_inputs, daemon=True)
+    button_control_thread.start()
     app.run(host='0.0.0.0', port=config.LISTEN_PORT)

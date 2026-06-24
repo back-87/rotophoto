@@ -13,7 +13,10 @@
      5V TERM.  KY-003 (with A3144 sensor) POWER - 5V
      20        KY-003 (with A3144 sensor) GROUND
      25        10kΩ resistor line, one end from 16 **after 2kΩ resistor**, other to 25 / ground
-     29        Common ground between CNC Shield (hosts stepper driver) 24V terminal and Pi ground
+     30        To GROUND terminal. Terminal: Common ground between CNC Shield (hosts stepper driver) 24V terminal and Pi ground
+     34        To GROUND terminal. Terminal: control enclosure (2x buttons) grounds
+     18        Previous Slide Button SIGNAL
+     22        Next Slide Button SIGNAL
 
           --- TOP OF BOARD (Near Fan Header) ---
            3.3V Power  [ 1 ] [ 2 ]  5V Power
