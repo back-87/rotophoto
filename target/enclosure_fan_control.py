@@ -3,8 +3,10 @@ import time
 import signal
 import sys
 
+h = None
 
 def set_half_duty_cycle():
+    global h
     #Open the GPIO chip (gpiochip0 handles GPIOs 0-27 on Pi 5)
     h = lgpio.gpiochip_open(0)
 

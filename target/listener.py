@@ -56,7 +56,7 @@ def start_viewer_once():
 
     # Launch Pi3D PictureFrame natively
     cmd = [
-        "picframe", 
+        "/home/back/rotophoto/venv/bin/picframe", 
         "/home/back/picframe_data/config/configuration.yaml"
     ]
 
@@ -88,14 +88,11 @@ def draw_date_location_overlay_on_current_image(text_string):
         return 
 
     if LAST_RECEIVED_IMAGE_HASH == LAST_OVERLAYED_IMAGE_HASH:
-        print(f"DEUBG LAST_OVERLAYED_IMAGE_HASH {LAST_OVERLAYED_IMAGE_HASH}  *did* equal current_file_hash: {LAST_RECEIVED_IMAGE_HASH}")
         if incoming_len <= LAST_STAMPED_STRING_LEN:
             return 
             
     else:
-        print(f"DEUBG LAST_OVERLAYED_IMAGE_HASH {LAST_OVERLAYED_IMAGE_HASH}  did *not* equal current_file_hash: {LAST_RECEIVED_IMAGE_HASH}")
         LAST_OVERLAYED_IMAGE_HASH = LAST_RECEIVED_IMAGE_HASH
-        print(f"DEUBG LAST_OVERLAYED_IMAGE_HASH Now set to: {LAST_RECEIVED_IMAGE_HASH} ")
         LAST_STAMPED_STRING_LEN = 0
 
     with Image.open(config.ACTIVE_PATH) as image_object:

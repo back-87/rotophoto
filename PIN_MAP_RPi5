@@ -17,6 +17,7 @@
      34        To GROUND terminal. Terminal: control enclosure (2x buttons) grounds
      18        Previous Slide Button SIGNAL
      22        Next Slide Button SIGNAL
+     33        PWM enclosure fan control
 
           --- TOP OF BOARD (Near Fan Header) ---
            3.3V Power  [ 1 ] [ 2 ]  5V Power
