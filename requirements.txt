@@ -6,3 +6,6 @@ requests>=2.33.1
 gpiod>=2.4.2
 picframe>=2026.4.22
 paho-mqtt>=2.1.0
+adafruit-blinka>=9.2.0
+adafruit-circuitpython-ads1x15>=3.0.5
+
