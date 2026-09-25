@@ -1,23 +1,13 @@
- PHYSICAL PIN  ASSIGNMENT
+ Hall effect analog (for north magent polarity detection) go to an ADS1115 which connects to i2c (SDA/SCL)
+
+  GPIO LINE    ASSIGNMENT
  ------------  ----------
-     11        Stepper Shield EN (ENGAGE)
-     9         Stepper Shield GROUND
-     12        Stepper Shield Y.STEP
-     13        Stepper Shield Y.DR
-     2         5V terminal connection. Terminal hosts: 40mm Noctua enclosure fan power   , *and* 5V connection to shield, *and* KY-003 (with A3144 sensor) POWER
-     6         PIR (AM312) GROUND.
-     15        PIR (AM312) SIGNAL
-     4         PIR (AM312) POWER - 5V
-     14        40mm Noctua enclosure fan ground
-     16        KY-003 (with A3144 sensor) SIGNAL **2k Ω resistor inline, junction to ground wire with 10k Ω resistor to ground, see pin 25**
-     5V TERM.  KY-003 (with A3144 sensor) POWER - 5V
-     20        KY-003 (with A3144 sensor) GROUND
-     25        10kΩ resistor line, one end from 16 **after 2kΩ resistor**, other to 25 / ground
-     30        To GROUND terminal. Terminal: Common ground between CNC Shield (hosts stepper driver) 24V terminal and Pi ground
-     34        To GROUND terminal. Terminal: control enclosure (2x buttons) grounds
-     18        Previous Slide Button SIGNAL
-     22        Next Slide Button SIGNAL
-     33        PWM enclosure fan control
+
+     4         Stepper EN(able) 
+     17        Stepper STEP
+     27        Stepper DIR
+     10        ADS1115 ALRT (I2C Alert refers to the SMBus Alert protocol, an optional mechanism that allows slave devices to interrupt the I2C bus master to signal an error or event.)
+
 
           --- TOP OF BOARD (Near Fan Header) ---
            3.3V Power  [ 1 ] [ 2 ]  5V Power
